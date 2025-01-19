@@ -708,6 +708,16 @@ public:
     void SetUp(json &solver);
 };
 
+struct JosephsonConfig 
+{
+    // Vector of locations to probe field values
+    std::vector<mfem::Vector> locations;
+    // Convergence threshold for field values
+    double convergence_threshold = 1e-6;
+    // Maximum iterations for field convergence
+    int max_iterations = 100;
+};
+
 struct SolverData
 {
 public:
