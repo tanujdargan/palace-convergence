@@ -1944,4 +1944,38 @@ void SolverData::SetUp(json &config)
   }
 }
 
+void EigenmodeSolverData::SetUp(json &solver)
+{
+    auto eigenmode = solver.find("Eigenmode");
+    if (eigenmode == solver.end())
+    {
+        return;
+    }
+
+    n = eigenmode->value("N", n);
+    n_post = eigenmode->value("Save", n_post);
+    tol = eigenmode->value("Tol", tol);
+    target = eigenmode->value("Target", target);
+    start_vector_constant = eigenmode->value("StartVectorConstant", start_vector_constant);
+
+    // Parse Josephson element configuration
+    auto josephson = eigenmode->find("JosephsonElements");
+    if (josephson != eigenmode->end())
+    {
+        field_convergence_threshold = josephson->value("ConvergenceThreshold", 
+                                                     field_convergence_threshold);
+        max_field_iterations = josephson->value("MaxIterations", max_field_iterations);
+        
+        for (const auto& element : (*josephson)["Elements"])
+        {
+            JosephsonElementData data;
+            data.index = element["Index"].get<int>();
+            data.location = element["Location"].get<std::vector<double>>();
+            data.critical_current = element.value("CriticalCurrent", 1e-6);
+            data.junction_capacitance = element.value("Capacitance", 0.0);
+            josephson_elements.push_back(data);
+        }
+    }
+}
+
 }  // namespace palace::config

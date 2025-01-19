@@ -26,7 +26,7 @@ namespace palace
 using namespace std::complex_literals;
 
 std::pair<ErrorIndicator, long long int>
-EigenSolver::Solve(const std::vector<std::unique_ptr<Mesh>> &mesh) const
+EigenSolver::Solve(const std::vector<std::unique_ptr<Mesh>> &mesh) const override
 {
   // Construct and extract the system matrices defining the eigenvalue problem. The diagonal
   // values for the mass matrix PEC dof shift the Dirichlet eigenvalues out of the
@@ -257,73 +257,144 @@ EigenSolver::Solve(const std::vector<std::unique_ptr<Mesh>> &mesh) const
       iodata.solver.linear.estimator_mg);
   ErrorIndicator indicator;
 
-  // Eigenvalue problem solve.
-  BlockTimer bt1(Timer::EPS);
-  Mpi::Print("\n");
-  int num_conv = eigen->Solve();
+  // New field-based convergence criteria
+  bool field_converged = false;
+  while (!field_converged)
   {
-    std::complex<double> lambda = (num_conv > 0) ? eigen->GetEigenvalue(0) : 0.0;
-    Mpi::Print(" Found {:d} converged eigenvalue{}{}\n", num_conv,
-               (num_conv > 1) ? "s" : "",
-               (num_conv > 0)
-                   ? fmt::format(" (first = {:.3e}{:+.3e}i)", lambda.real(), lambda.imag())
-                   : "");
-  }
-  BlockTimer bt2(Timer::POSTPRO);
-  SaveMetadata(*ksp);
-
-  // Calculate and record the error indicators, and postprocess the results.
-  Mpi::Print("\nComputing solution error estimates and performing postprocessing\n");
-  if (!KM)
-  {
-    // Normalize the finalized eigenvectors with respect to mass matrix (unit electric field
-    // energy) even if they are not computed to be orthogonal with respect to it.
-    KM = space_op.GetInnerProductMatrix(0.0, 1.0, nullptr, M.get());
-    eigen->SetBMat(*KM);
-    eigen->RescaleEigenvectors(num_conv);
-  }
-  Mpi::Print("\n");
-  for (int i = 0; i < num_conv; i++)
-  {
-    // Get the eigenvalue and relative error.
-    std::complex<double> omega = eigen->GetEigenvalue(i);
-    double error_bkwd = eigen->GetError(i, EigenvalueSolver::ErrorType::BACKWARD);
-    double error_abs = eigen->GetError(i, EigenvalueSolver::ErrorType::ABSOLUTE);
-    if (!C)
+    // Eigenvalue problem solve.
+    BlockTimer bt1(Timer::EPS);
+    Mpi::Print("\n");
+    int num_conv = eigen->Solve();
     {
-      // Linear EVP has eigenvalue μ = -λ² = ω².
-      omega = std::sqrt(omega);
+      std::complex<double> lambda = (num_conv > 0) ? eigen->GetEigenvalue(0) : 0.0;
+      Mpi::Print(" Found {:d} converged eigenvalue{}{}\n", num_conv,
+                 (num_conv > 1) ? "s" : "",
+                 (num_conv > 0)
+                     ? fmt::format(" (first = {:.3e}{:+.3e}i)", lambda.real(), lambda.imag())
+                     : "");
     }
-    else
+    BlockTimer bt2(Timer::POSTPRO);
+    SaveMetadata(*ksp);
+
+    // Calculate and record the error indicators, and postprocess the results.
+    Mpi::Print("\nComputing solution error estimates and performing postprocessing\n");
+    if (!KM)
     {
-      // Quadratic EVP solves for eigenvalue λ = iω.
-      omega /= 1i;
+      // Normalize the finalized eigenvectors with respect to mass matrix (unit electric field
+      // energy) even if they are not computed to be orthogonal with respect to it.
+      KM = space_op.GetInnerProductMatrix(0.0, 1.0, nullptr, M.get());
+      eigen->SetBMat(*KM);
+      eigen->RescaleEigenvectors(num_conv);
     }
-
-    // Compute B = -1/(iω) ∇ x E on the true dofs, and set the internal GridFunctions in
-    // PostOperator for all postprocessing operations.
-    eigen->GetEigenvector(i, E);
-    Curl.Mult(E.Real(), B.Real());
-    Curl.Mult(E.Imag(), B.Imag());
-    B *= -1.0 / (1i * omega);
-    post_op.SetEGridFunction(E);
-    post_op.SetBGridFunction(B);
-    post_op.UpdatePorts(space_op.GetLumpedPortOp(), omega.real());
-    const double E_elec = post_op.GetEFieldEnergy();
-    const double E_mag = post_op.GetHFieldEnergy();
-
-    // Calculate and record the error indicators.
-    if (i < iodata.solver.eigenmode.n)
+    Mpi::Print("\n");
+    for (int i = 0; i < num_conv; i++)
     {
-      estimator.AddErrorIndicator(E, B, E_elec + E_mag, indicator);
+      // Get the eigenvalue and relative error.
+      std::complex<double> omega = eigen->GetEigenvalue(i);
+      double error_bkwd = eigen->GetError(i, EigenvalueSolver::ErrorType::BACKWARD);
+      double error_abs = eigen->GetError(i, EigenvalueSolver::ErrorType::ABSOLUTE);
+      if (!C)
+      {
+        // Linear EVP has eigenvalue μ = -λ² = ω².
+        omega = std::sqrt(omega);
+      }
+      else
+      {
+        // Quadratic EVP solves for eigenvalue λ = iω.
+        omega /= 1i;
+      }
+
+      // Compute B = -1/(iω) ∇ x E on the true dofs, and set the internal GridFunctions in
+      // PostOperator for all postprocessing operations.
+      eigen->GetEigenvector(i, E);
+      Curl.Mult(E.Real(), B.Real());
+      Curl.Mult(E.Imag(), B.Imag());
+      B *= -1.0 / (1i * omega);
+      post_op.SetEGridFunction(E);
+      post_op.SetBGridFunction(B);
+      post_op.UpdatePorts(space_op.GetLumpedPortOp(), omega.real());
+      const double E_elec = post_op.GetEFieldEnergy();
+      const double E_mag = post_op.GetHFieldEnergy();
+
+      // Calculate and record the error indicators.
+      if (i < iodata.solver.eigenmode.n)
+      {
+        estimator.AddErrorIndicator(E, B, E_elec + E_mag, indicator);
+      }
+
+      // Postprocess the mode.
+      Postprocess(post_op, space_op.GetLumpedPortOp(), i, omega, error_bkwd, error_abs,
+                  num_conv, E_elec, E_mag,
+                  (i == iodata.solver.eigenmode.n - 1) ? &indicator : nullptr);
     }
 
-    // Postprocess the mode.
-    Postprocess(post_op, space_op.GetLumpedPortOp(), i, omega, error_bkwd, error_abs,
-                num_conv, E_elec, E_mag,
-                (i == iodata.solver.eigenmode.n - 1) ? &indicator : nullptr);
+    // Check field-based convergence
+    field_converged = CheckFieldConvergence();
   }
   return {indicator, space_op.GlobalTrueVSize()};
+}
+
+bool EigenSolver::CheckFieldConvergence() const
+{
+    // Define a threshold for convergence
+    const double convergence_threshold = 1e-6;
+
+    // Retrieve field values at Josephson elements
+    std::vector<std::complex<double>> field_values = GetFieldValuesAtJosephsonElements();
+
+    // Calculate a convergence metric (e.g., maximum change in field values)
+    double max_change = 0.0;
+    for (size_t i = 0; i < field_values.size(); ++i)
+    {
+        // Calculate the change in field value for this element
+        double change = std::abs(field_values[i] - previous_field_values[i]);
+        if (change > max_change)
+        {
+            max_change = change;
+        }
+    }
+
+    // Update previous field values for the next iteration
+    previous_field_values = field_values;
+
+    // Check if the maximum change is below the threshold
+    return max_change < convergence_threshold;
+}
+
+// Helper function to get field values at Josephson elements
+std::vector<std::complex<double>> EigenSolver::GetFieldValuesAtJosephsonElements() const
+{
+    MFEM_VERIFY(post_op.HasE(), "PostOperator not configured for electric field probes!");
+    
+    std::vector<std::complex<double>> field_values;
+    const auto& josephson_elements = iodata.solver.eigenmode.josephson_elements;
+    
+    // Reference to existing probe functionality in BaseSolver.cpp
+    // See lines 592-610 for probe implementation details
+    
+    // Add probe points for each Josephson element
+    for (const auto& element : josephson_elements)
+    {
+        mfem::Vector location(3);
+        location(0) = element.location[0];
+        location(1) = element.location[1];
+        location(2) = element.location[2];
+        
+        // Add probe point at Josephson element location
+        post_op.AddProbe(location);
+    }
+    
+    // Get E-field values using existing probe functionality
+    field_values = post_op.ProbeEField();
+    
+    // Scale field values to appropriate units using existing dimensionalization
+    const double scale = iodata.DimensionalizeValue(IoData::ValueType::FIELD_E, 1.0);
+    for (auto& value : field_values)
+    {
+        value *= scale;
+    }
+    
+    return field_values;
 }
 
 void EigenSolver::Postprocess(const PostOperator &post_op,
@@ -628,6 +699,36 @@ void EigenSolver::PostprocessEPR(const PostOperator &post_op,
     }
     output.print("\n");
   }
+}
+
+void EigenSolver::SetJosephsonElements(const std::vector<mfem::Vector>& locations, 
+                                    double conv_threshold = 1e-6) {
+    josephson_config.locations = locations;
+    josephson_config.convergence_threshold = conv_threshold;
+}
+
+bool EigenSolver::CheckFieldConvergence() const {
+    // Get current field values
+    std::vector<std::complex<double>> current_values = GetFieldValuesAtJosephsonElements();
+    
+    // If this is the first iteration, store values and return false
+    if (previous_field_values.empty()) {
+        previous_field_values = current_values;
+        return false;
+    }
+    
+    // Calculate maximum change in field values
+    double max_change = 0.0;
+    for (size_t i = 0; i < current_values.size(); ++i) {
+        double change = std::abs(current_values[i] - previous_field_values[i]);
+        max_change = std::max(max_change, change);
+    }
+    
+    // Update previous values for next iteration
+    previous_field_values = current_values;
+    
+    // Check if converged
+    return max_change < josephson_config.convergence_threshold;
 }
 
 }  // namespace palace

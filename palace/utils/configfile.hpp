@@ -674,291 +674,38 @@ public:
   void SetUp(json &solver);
 };
 
-struct EigenSolverData
+struct JosephsonElementData
 {
-public:
-  // Target for shift-and-invert spectral transformation [GHz].
-  double target = 0.0;
-
-  // Eigenvalue solver relative tolerance.
-  double tol = 1.0e-6;
-
-  // Maximum iterations for eigenvalue solver.
-  int max_it = -1;
-
-  // Eigenvalue solver subspace dimension or maximum dimension before restart.
-  int max_size = -1;
-
-  // Desired number of eigenmodes.
-  int n = 1;
-
-  // Number of modes to write to disk.
-  int n_post = 0;
-
-  // Use operator scaling in order to increase numerical robustness.
-  bool scale = true;
-
-  // Compute and set a starting vector for the eigenvalue solver.
-  bool init_v0 = true;
-  bool init_v0_const = false;
-
-  // Orthogonalize basis vectors using a mass matrix inner product, instead of generating
-  // using a standard ℓ² (Euclidean) norm.
-  bool mass_orthog = false;
-
-  // Eigenvalue solver type.
-  using Type = WavePortData::EigenSolverType;
-  Type type = Type::DEFAULT;
-
-  // For SLEPc eigenvalue solver, use linearized formulation for quadratic eigenvalue
-  // problems.
-  bool pep_linear = true;
-
-  void SetUp(json &solver);
+    // Location of the Josephson element in 3D space
+    std::vector<double> location;
+    // Unique identifier for the element
+    int index;
+    // Material properties
+    double critical_current;  // Critical current in amperes
+    double junction_capacitance;  // Junction capacitance in farads
 };
 
-struct ElectrostaticSolverData
+struct EigenmodeSolverData
 {
 public:
-  // Number of fields to write to disk.
-  int n_post = 0;
-
-  void SetUp(json &solver);
-};
-
-struct MagnetostaticSolverData
-{
-public:
-  // Number of fields to write to disk.
-  int n_post = 0;
-
-  void SetUp(json &solver);
-};
-
-struct TransientSolverData
-{
-public:
-  // Time integration scheme type.
-  enum class Type
-  {
-    GEN_ALPHA,
-    RUNGE_KUTTA,
-    ARKODE,
-    CVODE,
-    DEFAULT = GEN_ALPHA
-  };
-  Type type = Type::DEFAULT;
-
-  // Excitation type for port excitation.
-  enum class ExcitationType
-  {
-    SINUSOIDAL,
-    GAUSSIAN,
-    DIFF_GAUSSIAN,
-    MOD_GAUSSIAN,
-    RAMP_STEP,
-    SMOOTH_STEP
-  };
-  ExcitationType excitation = ExcitationType::SINUSOIDAL;
-
-  // Excitation parameters: frequency [GHz] and pulse width [ns].
-  double pulse_f = 0.0;
-  double pulse_tau = 0.0;
-
-  // Upper bound of time interval [ns].
-  double max_t = 1.0;
-
-  // Step size for time stepping [ns].
-  double delta_t = 1.0e-2;
-
-  // Step increment for saving fields to disk.
-  int delta_post = 0;
-
-  // RK scheme order for SUNDIALS ARKODE integrators.
-  // Max order for SUNDIALS CVODE integrator.
-  // Not used for generalized α and Runge-Kutta integrators.
-  int order = 2;
-
-  // Adaptive time-stepping tolerances for CVODE and ARKODE.
-  double rel_tol = 1e-4;
-  double abs_tol = 1e-9;
-
-  void SetUp(json &solver);
-};
-
-struct LinearSolverData
-{
-public:
-  // Solver type.
-  enum class Type
-  {
-    DEFAULT,
-    AMS,
-    BOOMER_AMG,
-    MUMPS,
-    SUPERLU,
-    STRUMPACK,
-    STRUMPACK_MP,
-    JACOBI
-  };
-  Type type = Type::DEFAULT;
-
-  // Krylov solver type.
-  enum class KspType
-  {
-    DEFAULT,
-    CG,
-    MINRES,
-    GMRES,
-    FGMRES,
-    BICGSTAB
-  };
-  KspType ksp_type = KspType::DEFAULT;
-
-  // Iterative solver relative tolerance.
-  double tol = 1.0e-6;
-
-  // Maximum iterations for iterative solver.
-  int max_it = 100;
-
-  // Maximum Krylov space dimension for GMRES/FGMRES iterative solvers.
-  int max_size = -1;
-
-  // Reuse previous solution as initial guess for Krylov solvers.
-  int initial_guess = -1;
-
-  // Maximum number of levels for geometric multigrid (set to 1 to disable multigrid).
-  int mg_max_levels = 100;
-
-  // Type of coarsening for p-multigrid.
-  enum class MultigridCoarsenType
-  {
-    LINEAR,
-    LOGARITHMIC
-  };
-  MultigridCoarsenType mg_coarsen_type = MultigridCoarsenType::LOGARITHMIC;
-
-  // Controls whether or not to include in the geometric multigrid hierarchy the mesh levels
-  // from uniform refinement.
-  bool mg_use_mesh = true;
-
-  // Number of iterations for preconditioners which support it. For multigrid, this is the
-  // number of V-cycles per Krylov solver iteration.
-  int mg_cycle_it = 1;
-
-  // Use auxiliary space smoothers on geometric multigrid levels.
-  int mg_smooth_aux = -1;
-
-  // Number of pre-/post-smoothing iterations at each geometric or algebraic multigrid
-  // level.
-  int mg_smooth_it = 1;
-
-  // Order of polynomial smoothing for geometric multigrid.
-  int mg_smooth_order = -1;
-
-  // Safety factors for eigenvalue estimates associated with Chebyshev smoothing for
-  // geometric multigrid.
-  double mg_smooth_sf_max = 1.0;
-  double mg_smooth_sf_min = 0.0;
-
-  // Smooth based on 4th-kind Chebyshev polynomials for geometric multigrid, otherwise
-  // use standard 1st-kind polynomials.
-  bool mg_smooth_cheby_4th = true;
-
-  // For frequency domain applications, precondition linear systems with a real-valued
-  // approximation to the system matrix.
-  bool pc_mat_real = false;
-
-  // For frequency domain applications, precondition linear systems with a shifted matrix
-  // (makes the preconditoner matrix SPD).
-  int pc_mat_shifted = -1;
-
-  // For frequency domain applications, use the complex-valued system matrix in the sparse
-  // direct solver.
-  bool complex_coarse_solve = false;
-
-  // Choose left or right preconditioning.
-  enum class SideType
-  {
-    DEFAULT,
-    RIGHT,
-    LEFT
-  };
-  SideType pc_side_type = SideType::DEFAULT;
-
-  // Specify details for the column ordering method in the symbolic factorization for sparse
-  // direct solvers.
-  enum class SymFactType
-  {
-    DEFAULT,
-    METIS,
-    PARMETIS,
-    SCOTCH,
-    PTSCOTCH,
-    PORD,
-    AMD,
-    RCM
-  };
-  SymFactType sym_fact_type = SymFactType::DEFAULT;
-
-  // Low-rank and butterfly compression parameters for sparse direct solvers which support
-  // it (mainly STRUMPACK).
-  enum class CompressionType
-  {
-    NONE,
-    BLR,
-    HSS,
-    HODLR,
-    ZFP,
-    BLR_HODLR,
-    ZFP_BLR_HODLR
-  };
-  CompressionType strumpack_compression_type = CompressionType::NONE;
-  double strumpack_lr_tol = 1.0e-3;
-  int strumpack_lossy_precision = 16;
-  int strumpack_butterfly_l = 1;
-
-  // Option to enable 3D process grid for SuperLU_DIST solver.
-  bool superlu_3d = false;
-
-  // Option to use vector or scalar Pi-space corrections for the AMS preconditioner.
-  bool ams_vector_interp = false;
-
-  // Option to tell the AMS solver that the operator is singular, like for magnetostatic
-  // problems.
-  int ams_singular_op = -1;
-
-  // Option to use aggressive coarsening for Hypre AMG solves (with BoomerAMG or AMS).
-  // Typically use this when the operator is positive definite.
-  int amg_agg_coarsen = -1;
-
-  // Relative tolerance for solving linear systems in divergence-free projector.
-  double divfree_tol = 1.0e-12;
-
-  // Maximum number of iterations for solving linear systems in divergence-free projector.
-  int divfree_max_it = 1000;
-
-  // Relative tolerance for solving linear systems in the error estimator.
-  double estimator_tol = 1.0e-6;
-
-  // Maximum number of iterations for solving linear systems in the error estimator.
-  int estimator_max_it = 10000;
-
-  // Use geometric multigrid + AMG for error estimator linear solver preconditioner (instead
-  // of just Jacobi).
-  bool estimator_mg = false;
-
-  // Enable different variants of Gram-Schmidt orthogonalization for GMRES/FGMRES iterative
-  // solvers and SLEPc eigenvalue solver.
-  enum class OrthogType
-  {
-    MGS,
-    CGS,
-    CGS2
-  };
-  OrthogType gs_orthog_type = OrthogType::MGS;
-
-  void SetUp(json &solver);
+    // Number of eigenvalues to compute
+    int n = 1;
+    // Number of fields to write to disk
+    int n_post = 0;
+    // Convergence tolerance
+    double tol = 1.0e-6;
+    // Target frequency [GHz]
+    double target = 0.0;
+    // Use a constant vector as initial guess
+    bool start_vector_constant = false;
+    // Josephson element configuration
+    std::vector<JosephsonElementData> josephson_elements;
+    // Field convergence threshold for Josephson elements
+    double field_convergence_threshold = 1e-6;
+    // Maximum number of iterations for field convergence
+    int max_field_iterations = 100;
+    
+    void SetUp(json &solver);
 };
 
 struct SolverData
@@ -991,7 +738,7 @@ public:
 
   // Solver objects.
   DrivenSolverData driven = {};
-  EigenSolverData eigenmode = {};
+  EigenmodeSolverData eigenmode = {};
   ElectrostaticSolverData electrostatic = {};
   MagnetostaticSolverData magnetostatic = {};
   TransientSolverData transient = {};
